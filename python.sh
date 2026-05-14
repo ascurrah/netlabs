@@ -102,7 +102,6 @@ fi
 
 echo "Found $(wc -l < "$LIVE_HOSTS") live hosts."
 
-{} \
 echo "Starting Nmap stealth scans in parallel..."
 
 cat "$LIVE_HOSTS" | xargs -P "$CONCURRENCY" -I {} sh -c '
