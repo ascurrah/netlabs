@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Fail fast and enable safer bash semantics
+set -euo pipefail
+
 # Check if running as root
 if [[ $EUID -ne 0 ]]; then
     echo "This script must be run as root. Please use sudo."
@@ -12,20 +15,18 @@ if ! command -v nmap &> /dev/null; then
     exit 1
 fi
 
-# Function to validate IPv4 address
+# Function to validate IPv4 address (robust regex for 0-255)
 validate_ip() {
     local ip=$1
 
     IFS='.' read -r -a octets <<< "$ip"
-
     if [ ${#octets[@]} -ne 4 ]; then
         return 1
     fi
 
+    local octet_regex='^(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])$'
     for octet in "${octets[@]}"; do
-        if ! [[ "$octet" =~ ^[0-9]+$ ]] || \
-           [ "$octet" -lt 0 ] || \
-           [ "$octet" -gt 255 ]; then
+        if ! [[ $octet =~ $octet_regex ]]; then
             return 1
         fi
     done
@@ -33,16 +34,12 @@ validate_ip() {
     return 0
 }
 
-# Function to validate CIDR notation
+# Function to validate CIDR notation (0-32)
 validate_cidr() {
     local cidr=$1
-
-    if ! [[ "$cidr" =~ ^[0-9]+$ ]] || \
-       [ "$cidr" -lt 0 ] || \
-       [ "$cidr" -gt 32 ]; then
+    if ! [[ $cidr =~ ^([0-9]|[12][0-9]|3[0-2])$ ]]; then
         return 1
     fi
-
     return 0
 }
 
@@ -71,43 +68,53 @@ fi
 
 TIMESTAMP=$(date +%F_%H-%M-%S)
 
+# Configurable variables (adjust as needed)
+DECOYS="192.168.0.114,192.168.0.115,192.168.0.116,192.168.0.117,192.168.0.118"
+SPOOF_MAC="00:50:56:9D:E3:F9"
+CONCURRENCY=5
+
 NMAP_OUTPUT_DIR="nmap_scans_$TIMESTAMP"
-LIVE_HOSTS="live_hosts_$TIMESTAMP.txt"
 
 mkdir -p "$NMAP_OUTPUT_DIR"
+
+# Live hosts temp file (use mktemp for safety)
+LIVE_HOSTS=$(mktemp)
+trap 'rm -f "$LIVE_HOSTS"' EXIT
+
+# Export values so child sh -c can access them
+export DECOYS SPOOF_MAC
 
 echo "Starting device scan on $TARGET_NETWORK..."
 
 # Host discovery
 nmap -sn \
--D 192.168.0.114,192.168.0.115,192.168.0.116,192.168.0.117,192.168.0.118 \
---spoof-mac 00:50:56:9D:E3:F9 \
--n "$TARGET_NETWORK" | \
-grep "Nmap scan report for" | \
-awk '{print $5}' | \
-sort -u > "$LIVE_HOSTS"
+    -D "$DECOYS" \
+    --spoof-mac "$SPOOF_MAC" \
+    -n "$TARGET_NETWORK" | \
+    awk '/Nmap scan report for/ {print $NF}' | tr -d '()' | sort -u > "$LIVE_HOSTS"
 
 # Check for live hosts
 if [ ! -s "$LIVE_HOSTS" ]; then
     echo "No live hosts found on $TARGET_NETWORK."
-    rm "$LIVE_HOSTS"
+    rm -f "$LIVE_HOSTS"
     exit 1
 fi
 
 echo "Found $(wc -l < "$LIVE_HOSTS") live hosts."
 
+{} \
 echo "Starting Nmap stealth scans in parallel..."
 
-cat "$LIVE_HOSTS" | xargs -P 5 -I {} sh -c '
-nmap -n \
--p 1-1000,3000-4000 \
--D 192.168.0.114,192.168.0.115,192.168.0.116,192.168.0.117,192.168.0.118 \
---spoof-mac 00:50:56:9D:3C:C6 \
--sS -sV -O \
---host-timeout 5m \
-{} \
--oN "'"$NMAP_OUTPUT_DIR"'/nmap_scan_{}.txt"
-'
+cat "$LIVE_HOSTS" | xargs -P "$CONCURRENCY" -I {} sh -c '
+    nmap -n \
+        -p 1-1000,3000-4000 \
+        -D "$DECOYS" \
+        --spoof-mac "$SPOOF_MAC" \
+        -sS -sV -O \
+        --host-timeout 5m \
+        "$1" \
+        -oN "$2/nmap_scan_$1.txt"
+' _ {} "$NMAP_OUTPUT_DIR"
 
 echo "All scans completed."
 echo "Results stored in $NMAP_OUTPUT_DIR/"
