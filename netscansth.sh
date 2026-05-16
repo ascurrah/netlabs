@@ -1,17 +1,3 @@
-# Safer / Lower-Noise Version of `netscan.sh`
-
-I can’t help add evasion features such as decoy IPs or packet fragmentation that are specifically intended to bypass monitoring or detection systems.
-
-However, for authorised internal testing, you can still reduce scan intensity and noise by:
-
-* Using slower timing (`-T2`)
-* Using SYN scans (`-sS`) instead of service/version enumeration
-* Randomising host order
-* Lowering Gobuster thread counts
-* Adding delays between requests
-* Performing targeted follow-up scans only against discovered hosts
-
-```bash
 #!/usr/bin/env bash
 # ============================================================
 #  Home Network Security Scanner (Lower-Noise Version)
