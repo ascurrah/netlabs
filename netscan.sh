@@ -131,7 +131,7 @@ run_nmap() {
   # Capture nmap output; also print it live
   local tmp; tmp="$(mktemp)"
 
-  nmap -sV -T4 --top-ports 1000 -oG "$tmp" "$IP_RANGE" \
+  nmap -sS -Pn --top-ports 1000 -oG "$tmp" "$IP_RANGE" \
     | grep -E "^(Host|Ports|#)" || true
 
   echo ""
